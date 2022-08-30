@@ -4,137 +4,193 @@ declare(strict_types=1);
 
 namespace Scandiweb\Test\Setup\Patch\Data;
 
+use Magento\Eav\Setup\EavSetup;
 use Magento\Framework\App\State;
-use Magento\Catalog\Model\CategoryFactory;
+use Magento\Catalog\Model\Product;
+use Magento\Catalog\Model\Product\Type;
+use Magento\Catalog\Model\Product\Visibility;
 use Magento\Store\Model\StoreManagerInterface;
 use Magento\Catalog\Api\ProductRepositoryInterface;
-use Magento\Catalog\Api\CategoryRepositoryInterface;
 use Magento\Catalog\Api\Data\ProductInterfaceFactory;
 use Magento\Framework\Setup\ModuleDataSetupInterface;
 use Magento\Framework\Setup\Patch\DataPatchInterface;
+use Magento\InventoryApi\Api\Data\SourceItemInterface;
+use Magento\InventoryApi\Api\SourceItemsSaveInterface;
 use Magento\Catalog\Api\CategoryLinkManagementInterface;
+use Magento\Catalog\Model\Product\Attribute\Source\Status;
+use Magento\InventoryApi\Api\Data\SourceItemInterfaceFactory;
 
 class AddSimpleProduct implements DataPatchInterface
 {
     /**
+     *
+     * @var ModuleDataSetupInterface
+     */
+    protected ModuleDataSetupInterface $setup;
+
+    /**
+     *
+     * @var ProductInterfaceFactory
+     */
+    protected ProductInterfaceFactory $productInterfaceFactory;
+
+    /**
+     *
      * @var ProductRepositoryInterface
      */
-    protected $productRepository;
+    protected ProductRepositoryInterface $productRepository;
 
     /**
-     * @var CategoryFactory
+     *
+     * @var State
      */
-    protected $categoryFactory;
+    protected State $appState;
 
     /**
-     * @var CategoryRepositoryInterface
+     *
+     * @var EavSetup
      */
-    protected $categoryRepository;
+    protected EavSetup $eavSetup;
 
     /**
-     * @var CategoryLinkManagementInterface
-     */
-    protected $categoryLink;
-
-    /**
+     *
      * @var StoreManagerInterface
      */
-    protected $storeManager;
+    protected StoreManagerInterface $storeManager;
+
+    /**
+     *
+     * @var SourceItemInterfaceFactory
+     */
+    protected SourceItemInterfaceFactory $sourceItemFactory;
+
+    /**
+     *
+     * @var SourceItemsSaveInterface
+     */
+    protected SourceItemsSaveInterface $sourceItemsSaveInterface;
+
+    /**
+     *
+     * @var CategoryLinkManagementInterface
+     */
+    protected CategoryLinkManagementInterface $categoryLink;
+
+    /**
+     *
+     * @var array
+     */
+    protected array $sourceItems = [];
 
     /**
      * AddSimpleProduct construct
      *
-     * @param ModuleDataSetupInterface $moduleDataSetup
-     * @param ProductInterfaceFactory $productFactory
+     * @param ModuleDataSetupInterface $setup
+     * @param ProductInterfaceFactory $productInterfaceFactory
      * @param ProductRepositoryInterface $productRepository
-     * @param CategoryFactory $categoryFactory
-     * @param CategoryRepositoryInterface $categoryRepository
+     * @param State $appState
      * @param StoreManagerInterface $storeManager
+     * @param EavSetup $eavSetup
+     * @param SourceItemInterfaceFactory $sourceItemFactory
+     * @param SourceItemsSaveInterface $sourceItemsSaveInterface
      * @param CategoryLinkManagementInterface $categoryLink
-     * @param State $state
      */
     public function __construct(
-        ModuleDataSetupInterface $moduleDataSetup,
-        ProductInterfaceFactory $productFactory,
+        ModuleDataSetupInterface $setup,
+        ProductInterfaceFactory $productInterfaceFactory,
         ProductRepositoryInterface $productRepository,
-        CategoryFactory $categoryFactory,
-        CategoryRepositoryInterface $categoryRepository,
+        State $appState,
         StoreManagerInterface $storeManager,
-        CategoryLinkManagementInterface $categoryLink,
-        State $state
+        EavSetup $eavSetup,
+        SourceItemInterfaceFactory $sourceItemFactory,
+        SourceItemsSaveInterface $sourceItemsSaveInterface,
+        CategoryLinkManagementInterface $categoryLink
     ) {
-        $this->moduleDataSetup = $moduleDataSetup;
-        $this->productFactory = $productFactory;
+        $this->appState = $appState;
+        $this->productInterfaceFactory = $productInterfaceFactory;
         $this->productRepository = $productRepository;
-        $this->categoryFactory = $categoryFactory;
-        $this->categoryRepository = $categoryRepository;
+        $this->setup = $setup;
+        $this->eavSetup = $eavSetup;
         $this->storeManager = $storeManager;
+        $this->sourceItemFactory = $sourceItemFactory;
+        $this->sourceItemsSaveInterface = $sourceItemsSaveInterface;
         $this->categoryLink = $categoryLink;
-        $state->setAreaCode('adminhtml');
     }
 
     /**
      *
      * @return void
      */
-    public function apply()
+    public function apply(): void
     {
-        $product = $this->productFactory->create();
-
-        $simpleProductArray = [
-            [
-                'sku'               => 'NIKE-SHOES',
-                'name'              => 'Air Jordan',
-                'attribute_id'      => '4',
-                'status'            => 1,
-                'weight'            => 1.4,
-                'price'             => 350,
-                'visibility'        => '4',
-                'type_id'           => 'simple',
-            ]
-        ];
-
-        foreach ($simpleProductArray as $data) {
-            /** create product */
-            $product = $this->productFactory->create();
-            $product->setSku($data['sku'])
-                ->setName($data['name'])
-                ->setAttributeSetId($data['attribute_id'])
-                ->setStatus($data['status'])
-                ->setWeight($data['weight'])
-                ->setPrice($data['price'])
-                ->setVisibility($data['visibility'])
-                ->setTypeId($data['type_id'])
-                ->setStockData(
-                    array(
-                        'use_config_manage_stock' => 0,
-                        'manage_stock' => 1,
-                        'is_in_stock' => 1,
-                        'qty' => 150
-                    )
-                );
-
-            $product = $this->productRepository->save($product);
-            /** Assign product to category */
-            $this->categoryLink->assignProductToCategories($product->getSku(), [2]);
-            $product->save();
-        }
+        $this->appState->emulateAreaCode('adminhtml', [$this, 'execute']);
     }
 
     /**
      *
-     * @return string[]
+     * @return void
      */
-    public static function getDependencies()
+    public function execute(): void
+    {
+        // create the product
+        $product = $this->productInterfaceFactory->create();
+
+        // check if the product already exists
+        if ($product->getIdBySku('NIKE-SHOES-1')) {
+            return;
+        }
+
+        // get the attribute set id from EavSetup object
+        $attributeSetId = $this->eavSetup->getAttributeSetId(Product::ENTITY, 'Default');
+
+        // set attributes
+        $product->setTypeId(Type::TYPE_SIMPLE)
+            ->setAttributeSetId($attributeSetId)
+            ->setName('Air Jordan 1')
+            ->setSku('NIKE-SHOES-1')
+            ->setUrlKey('air-jordan-1')
+            ->setPrice(349.99)
+            ->setVisibility(Visibility::VISIBILITY_BOTH)
+            ->setStatus(Status::STATUS_ENABLED);
+
+        // save the product to the repository
+        $product = $this->productRepository->save($product);
+
+        // assign product to a category
+        $this->categoryLink->assignProductToCategories($product->getSku(), [2]);
+
+        // create a source item
+        $sourceItem = $this->sourceItemFactory->create();
+        $sourceItem->setSourceCode('default');
+
+        // set the quantity of items in stock
+        $sourceItem->setQuantity(50);
+
+        // add the product's SKU that will be linked to this source item
+        $sourceItem->setSku($product->getSku());
+
+        // set the stock status
+        $sourceItem->setStatus(SourceItemInterface::STATUS_IN_STOCK);
+        $this->sourceItems[] = $sourceItem;
+
+        // save the source item
+        $this->sourceItemsSaveInterface->execute($this->sourceItems);
+    }
+
+    /**
+     *
+     * @return array
+     */
+    public static function getDependencies(): array
     {
         return [];
     }
 
     /**
      *
-     * @return string[]
+     * @return array
      */
-    public function getAliases()
+    public function getAliases(): array
     {
         return [];
     }
