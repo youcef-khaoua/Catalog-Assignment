@@ -156,25 +156,26 @@ class AddSimpleProduct implements DataPatchInterface
         // save the product to the repository
         $product = $this->productRepository->save($product);
 
-        // assign product to a category
-        $this->categoryLink->assignProductToCategories($product->getSku(), [2]);
-
+        
         // create a source item
         $sourceItem = $this->sourceItemFactory->create();
         $sourceItem->setSourceCode('default');
-
+        
         // set the quantity of items in stock
         $sourceItem->setQuantity(50);
-
+        
         // add the product's SKU that will be linked to this source item
         $sourceItem->setSku($product->getSku());
-
+        
         // set the stock status
         $sourceItem->setStatus(SourceItemInterface::STATUS_IN_STOCK);
         $this->sourceItems[] = $sourceItem;
-
+        
         // save the source item
         $this->sourceItemsSaveInterface->execute($this->sourceItems);
+
+        // assign product to a category (Men->Shoes)
+        $this->categoryLink->assignProductToCategories($product->getSku(), [3,4]);
     }
 
     /**
